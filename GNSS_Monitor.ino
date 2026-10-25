@@ -10,7 +10,7 @@
 #include <SparkFun_u-blox_GNSS_v3.h> //http://librarymanager/All#SparkFun_u-blox_GNSS_v3
 SFE_UBLOX_GNSS_SERIAL myGNSS;
 
-#define mySerial Serial2 // Change this to (e.g.) Serial1 if needed
+#define mySerial Serial2 // GNSS UART - shared by the u-blox and the Teseo module (same RX/TX pins)
 
 
 GigaDisplay_GFX tft;
@@ -30,8 +30,10 @@ volatile uint32_t timerCounter = 0;
 volatile bool eventTriggered = false;
 uint16_t Counter;
 
-#include "GNSS_UBlox.h"
-#include "NavSigDisplay.h"   // NAV-SIG list on the TFT (like the Serial Monitor)
+#include "NavSigDisplay.h"   // signal list on the TFT (like the Serial Monitor)
+#include "GNSS_UBlox.h"      // u-blox driver (UBX NAV-SIG)
+#include "GNSS_ST.h"         // ST Teseo-LIV4F driver (NMEA GSV/GSA)
+#include "GNSS_Detect.h"     // detects the connected module and runs its driver
 #include "Display.h"
 /*
 #include "DAQ.h"
@@ -55,8 +57,9 @@ void setup() {
       delay(100);
     timer100us.attach_us(&handle100usInterrupt, 100);
   TFT_Start();
-  GNSS_Setup();
-  NavSig_Init();   // draws the empty screen / "Waiting for NAV-SIG..." / "not detected"
+  NavSig_Init();   // title bar first, so something is visible during detection
+  GNSS_Detect();   // u-blox or ST Teseo-LIV4F?
+  NavSig_Init();   // redraw: active module badge / "Waiting..." / "No GNSS module detected"
   delay(1000);
 }
 
@@ -77,10 +80,9 @@ void loop(void) {
 
    // }  
   }
-  myGNSS.checkUblox();     // Check for the arrival of new data and process it.
-  myGNSS.checkCallbacks(); // Check if any callbacks are waiting to be processed (-> newSIG -> NavSig_Store)
+  GNSS_Task();             // runs the driver of the detected module (u-blox or Teseo)
 
-  NavSig_Task(tick);       // redraw TFT on new NAV-SIG data, refresh "age" every 0.5 s
+  NavSig_Task(tick);       // redraw TFT on new signal data, refresh "age" every 0.5 s
 }
 
 

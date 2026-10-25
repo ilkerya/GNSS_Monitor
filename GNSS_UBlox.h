@@ -123,10 +123,6 @@ const char* GNSS_SignalName(uint8_t gnssId, uint8_t sigId)
 
 }
 
-// Implemented in NavSigDisplay.h (included after this file)
-void NavSig_Store(UBX_NAV_SIG_data_t *ubxDataStruct);
-extern bool nsGnssOk;
-
 void newSIG(UBX_NAV_SIG_data_t *ubxDataStruct)
 {
   Serial.println();
@@ -162,23 +158,20 @@ void newSIG(UBX_NAV_SIG_data_t *ubxDataStruct)
   Serial.println(SV);
   }
 }
-void GNSS_Setup(){
-  Serial.println("SparkFun u-blox Example");
-  
-  mySerial.begin(38400); // The NEO-F10N defaults to 38400 baud
+// ---------------------------------------------------------------------------
+// u-blox driver: detection + configuration (called from GNSS_Detect.h)
+// ---------------------------------------------------------------------------
 
+// Probe for a u-blox receiver on mySerial at 38400 baud (NEO-F10N default).
+bool UBlox_Detect() {
+  mySerial.begin(38400); // The NEO-F10N defaults to 38400 baud
   //myGNSS.enableDebugging(); // Uncomment this line to enable helpful debug messages on Serial
-/*
-  while (myGNSS.begin(mySerial) == false) //Connect to the u-blox module using mySerial (UART)
-  {
-    Serial.println(F("u-blox GNSS not detected. Please check wiring. Retrying..."));
-    delay(1000);
-  }
-  */
-  nsGnssOk = myGNSS.begin(mySerial);
-  if (nsGnssOk == false)
-      Serial.println(F("u-blox GNSS not detected...."));
-    else   Serial.println(F("u-blox GNSS ok...."));
+  return myGNSS.begin(mySerial);
+}
+
+// Configure the detected u-blox receiver and enable NAV-SIG with callback.
+void UBlox_Setup() {
+  Serial.println(F("u-blox GNSS ok...."));
   if (myGNSS.getModuleInfo())
   {
     Serial.print(F("FWVER: "));
@@ -214,5 +207,10 @@ void GNSS_Setup(){
   myGNSS.softwareResetGNSSOnly(); // Restart the GNSS to apply the L5 health override
 
   myGNSS.setAutoNAVSIGcallbackPtr(&newSIG); // Enable automatic NAV SIG messages with callback to newSIG
+}
 
+// Call from loop() while the u-blox driver is active
+void UBlox_Task() {
+  myGNSS.checkUblox();     // Check for the arrival of new data and process it.
+  myGNSS.checkCallbacks(); // Check if any callbacks are waiting to be processed (-> newSIG -> NavSig_Store)
 }

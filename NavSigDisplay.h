@@ -1,10 +1,14 @@
 /*
   NavSigDisplay.h
-  Shows the UBX-NAV-SIG signal list (same content as the Serial Monitor output)
+  Shows the GNSS signal list (same content as the Serial Monitor output)
   on the Arduino GIGA Display Shield (800x480, landscape).
+  Works with both receivers - whichever one was detected at start-up:
+    u-blox (UBX-NAV-SIG)    -> GNSS_UBlox.h
+    ST Teseo-LIV4F (NMEA)   -> GNSS_ST.h
+  The active module is highlighted with a filled badge in the title bar.
 
   Layout
-    y   0..19   title line   : "GNSS NAV-SIG", module status, GPS time of day, data age
+    y   0..19   title line   : module badges [u-blox] [ST Teseo], signal count, time, data age
     y  20..39   summary line : signals per constellation + number used in the fix
     y  42..57   column header: Signal / SV / C/N0
     y  60..479  signal rows  : 2 columns x 26 rows = 52 signals per page
@@ -16,13 +20,21 @@
     Filled bar   = pseudorange used in the navigation solution, outline = tracked only
 
   Data flow
-    newSIG() (UBX callback)  -> NavSig_Store()  copies the data into a small snapshot
-    loop()                   -> NavSig_Task()   redraws when new data arrived, or on the 0.5 s tick
+    u-blox: newSIG() (UBX callback)  -> NavSig_Store()
+    Teseo : NMEA GSV/GSA parser      -> NavSig_Clear() / NavSig_Add() / NavSig_Commit()
+    loop()                           -> NavSig_Task()   redraws when new data arrived, or on the 0.5 s tick
 
   Drawing never happens inside the callback, and the full redraw is done with
   startBuffering()/endBuffering() so the screen does not flicker.
 */
 #pragma once
+
+// Implemented in GNSS_UBlox.h - 14-character signal name, u-blox gnssId/sigId numbering
+const char* GNSS_SignalName(uint8_t gnssId, uint8_t sigId);
+
+// Which receiver was detected at start-up
+enum GnssModule : uint8_t { GNSS_NONE = 0, GNSS_UBLOX, GNSS_TESEO };
+GnssModule gnssModule = GNSS_NONE;   // set by GNSS_Detect()
 
 // ---------- colours (RGB565) ----------
 #define NS_BLACK    0x0000
@@ -62,13 +74,13 @@ struct NavSigEntry {
 static NavSigEntry   nsSig[NS_MAX_SIGS];
 static uint8_t       nsCount      = 0;
 static uint8_t       nsReported   = 0;      // numSigs as reported by the receiver
-static uint32_t      nsITOW       = 0;
+static uint32_t      nsTimeSec    = 0;      // seconds of day
+static bool          nsTimeUtc    = false;  // false: GPS time (u-blox iTOW), true: UTC (NMEA)
 static uint32_t      nsLastMillis = 0;
 static bool          nsHaveData   = false;
 static volatile bool nsNewData    = false;
 static uint8_t       nsPage       = 0;
 static uint8_t       nsTick       = 0;
-bool                 nsGnssOk     = false;  // set by GNSS_Setup()
 
 // ---------- helpers ----------
 static uint16_t NavSig_ConstColor(uint8_t gnssId) {
@@ -92,6 +104,53 @@ static uint16_t NavSig_CnoColor(uint8_t cno) {
   return NS_DGREY;
 }
 
+// ---------- generic snapshot API (used by the Teseo NMEA driver) ----------
+static NavSigEntry nsWork[NS_MAX_SIGS];   // filled while an epoch is being received
+static uint8_t     nsWorkCount = 0;
+
+void NavSig_Clear() { nsWorkCount = 0; }
+
+// returns false if the table is full
+bool NavSig_Add(uint8_t gnssId, uint8_t sigId, uint8_t svId, uint8_t cno, bool used) {
+  if (nsWorkCount >= NS_MAX_SIGS) return false;
+  nsWork[nsWorkCount++] = { gnssId, sigId, svId, cno, used };
+  return true;
+}
+
+NavSigEntry* NavSig_WorkEntry(uint8_t i) { return (i < nsWorkCount) ? &nsWork[i] : nullptr; }
+uint8_t      NavSig_WorkCount()          { return nsWorkCount; }
+
+void NavSig_Commit(uint32_t timeSec, bool utc) {
+  memcpy(nsSig, nsWork, sizeof(NavSigEntry) * nsWorkCount);
+  nsCount      = nsWorkCount;
+  nsReported   = nsWorkCount;
+  nsTimeSec    = timeSec;
+  nsTimeUtc    = utc;
+  nsLastMillis = millis();
+  nsHaveData   = true;
+  nsNewData    = true;
+}
+
+// Prints the current snapshot in the same format as the u-blox newSIG() output
+void NavSig_PrintSerial(const char *source) {
+  Serial.println();
+  Serial.print(F("New "));
+  Serial.print(source);
+  Serial.print(F(" data received. It contains "));
+  Serial.print(nsCount);
+  Serial.println(F(" data blocks:"));
+  char line[14 + 4 + 4 + 100 + 1];
+  for (uint8_t i = 0; i < nsCount; i++) {
+    snprintf(line, 23, "%s%-4u%3u ", GNSS_SignalName(nsSig[i].gnssId, nsSig[i].sigId),
+             nsSig[i].svId, nsSig[i].cno);
+    uint8_t c = nsSig[i].cno > 99 ? 99 : nsSig[i].cno;
+    uint8_t k;
+    for (k = 0; k <= c; k++) line[22 + k] = '=';
+    line[22 + k] = 0;
+    Serial.println(line);
+  }
+}
+
 // Called from the UBX callback: copy only what we need, no drawing here.
 void NavSig_Store(UBX_NAV_SIG_data_t *d) {
   uint8_t n = d->header.numSigs;
@@ -106,41 +165,59 @@ void NavSig_Store(UBX_NAV_SIG_data_t *d) {
   }
   nsCount      = n;
   nsReported   = d->header.numSigs;
-  nsITOW       = d->header.iTOW;
+  nsTimeSec    = (d->header.iTOW / 1000UL) % 86400UL;   // GPS time of day
+  nsTimeUtc    = false;
   nsLastMillis = millis();
   nsHaveData   = true;
   nsNewData    = true;
 }
 
 // ---------- drawing ----------
+#define NS_STATUS_X 392
+
+// Module badge: filled + bold colour when active, grey outline when not
+static int16_t NavSig_DrawBadge(int16_t x, const char *text, uint16_t color, bool active) {
+  int16_t w = strlen(text) * NS_CHAR_W + 8;
+  if (active) {
+    tft.fillRoundRect(x, 1, w, 18, 4, color);
+    tft.setTextColor(NS_BLACK);
+  } else {
+    tft.drawRoundRect(x, 1, w, 18, 4, NS_GREY);
+    tft.setTextColor(NS_GREY);
+  }
+  tft.setCursor(x + 4, 2);
+  tft.print(text);
+  return x + w + 4;
+}
+
 static void NavSig_DrawStatus() {
-  // Right part of the title line: GPS time of day + age of the data
-  tft.fillRect(350, 0, 450, 20, NS_HEADERBG);
+  // Right part of the title line: time of day + age of the data
+  tft.fillRect(NS_STATUS_X - 6, 0, 800 - NS_STATUS_X + 6, 20, NS_HEADERBG);
   tft.setTextWrap(false);
   tft.setTextSize(2);
-  tft.setCursor(360, 2);
+  tft.setCursor(NS_STATUS_X, 2);
 
-  if (!nsGnssOk && !nsHaveData) {
+  if (gnssModule == GNSS_NONE && !nsHaveData) {
     tft.setTextColor(NS_RED);
-    tft.print("u-blox GNSS not detected");
+    tft.print("No GNSS module detected");
     return;
   }
   if (!nsHaveData) {
     tft.setTextColor(NS_YELLOW);
-    tft.print("Waiting for NAV-SIG...");
+    tft.print(gnssModule == GNSS_TESEO ? "Waiting for GSV..." : "Waiting for NAV-SIG...");
     return;
   }
 
-  uint32_t tod = (nsITOW / 1000UL) % 86400UL;   // GPS time of day
+  uint32_t tod = nsTimeSec;
   char buf[40];
-  snprintf(buf, sizeof(buf), "GPS %02lu:%02lu:%02lu",
+  snprintf(buf, sizeof(buf), "%s %02lu:%02lu:%02lu", nsTimeUtc ? "UTC" : "GPS",
            (unsigned long)(tod / 3600), (unsigned long)((tod / 60) % 60), (unsigned long)(tod % 60));
   tft.setTextColor(NS_WHITE);
   tft.print(buf);
 
   uint32_t age = (millis() - nsLastMillis) / 1000UL;
   snprintf(buf, sizeof(buf), "  age %lus", (unsigned long)age);
-  tft.setTextColor(age > 12 ? NS_RED : NS_GREY);   // NAV-SIG comes every 5 s
+  tft.setTextColor(age > 12 ? NS_RED : NS_GREY);   // u-blox: every 5 s, Teseo: every 1 s
   tft.print(buf);
 }
 
@@ -182,12 +259,13 @@ static void NavSig_DrawAll() {
   // ---- title line ----
   tft.fillRect(0, 0, 800, 20, NS_HEADERBG);
   tft.setTextSize(2);
-  tft.setCursor(4, 2);
-  tft.setTextColor(NS_YELLOW);
-  tft.print("GNSS NAV-SIG");
+  int16_t x = 2;
+  x = NavSig_DrawBadge(x, "u-blox",   NS_CYAN,   gnssModule == GNSS_UBLOX);
+  x = NavSig_DrawBadge(x, "ST Teseo", NS_YELLOW, gnssModule == GNSS_TESEO);
+  tft.setCursor(x + 6, 2);
   tft.setTextColor(NS_WHITE);
   char buf[48];
-  snprintf(buf, sizeof(buf), "  %u sig %u used", nsReported, totalUsed);
+  snprintf(buf, sizeof(buf), "%usig %uused", nsReported, totalUsed);
   tft.print(buf);
   NavSig_DrawStatus();
 
