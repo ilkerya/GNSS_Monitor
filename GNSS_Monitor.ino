@@ -31,6 +31,7 @@ volatile bool eventTriggered = false;
 uint16_t Counter;
 
 #include "GNSS_UBlox.h"
+#include "NavSigDisplay.h"   // NAV-SIG list on the TFT (like the Serial Monitor)
 #include "Display.h"
 /*
 #include "DAQ.h"
@@ -55,11 +56,14 @@ void setup() {
     timer100us.attach_us(&handle100usInterrupt, 100);
   TFT_Start();
   GNSS_Setup();
+  NavSig_Init();   // draws the empty screen / "Waiting for NAV-SIG..." / "not detected"
   delay(1000);
 }
 
 void loop(void) {
+  bool tick = false;
   if (eventTriggered) {
+    tick = true;
     eventTriggered = false; // Flag zurücksetzen
     digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
         // Fügen Sie hier Code ein, der alle 100µs ausgeführt werden soll,
@@ -69,12 +73,14 @@ void loop(void) {
     Counter++;
    // for (uint8_t rotation = 0; rotation < 4; rotation++) {
     // tft.setRotation(rotation);
-      testText();
+    //  testText();   // replaced by the NAV-SIG screen
 
    // }  
   }
-          myGNSS.checkUblox(); // Check for the arrival of new data and process it.
-       myGNSS.checkCallbacks(); // Check if any callbacks are waiting to be processed.
+  myGNSS.checkUblox();     // Check for the arrival of new data and process it.
+  myGNSS.checkCallbacks(); // Check if any callbacks are waiting to be processed (-> newSIG -> NavSig_Store)
+
+  NavSig_Task(tick);       // redraw TFT on new NAV-SIG data, refresh "age" every 0.5 s
 }
 
 

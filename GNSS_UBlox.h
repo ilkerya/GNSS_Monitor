@@ -1,3 +1,132 @@
+// Returns the 14-character (space padded) signal name used on Serial and on the TFT
+const char* GNSS_SignalName(uint8_t gnssId, uint8_t sigId)
+{
+    switch (gnssId)
+    {
+      case 0:
+        {
+          switch (sigId)
+          {
+            case 0:
+              return "GPS L1 C/A    ";
+            case 3:
+              return "GPS L2 CL     ";
+            case 4:
+              return "GPS L2 CM     ";
+            case 6:
+              return "GPS L5 I      ";
+            case 7:
+              return "GPS L5 Q      ";
+            default:
+              return "GPS Unknown   ";
+          }
+        }
+      case 1:
+        {
+          switch (sigId)
+          {
+            case 0:
+              return "SBAS L1 C/A   ";
+            default:
+              return "SBAS Unknown  ";
+          }
+        }
+      case 2:
+        {
+          switch (sigId)
+          {
+            case 0:
+              return "Galileo E1 C  ";
+            case 1:
+              return "Galileo E1 B  ";
+            case 3:
+              return "Galileo E5 aI ";
+            case 4:
+              return "Galileo E5 aQ ";
+            case 5:
+              return "Galileo E5 bI ";
+            case 6:
+              return "Galileo E5 bQ ";
+            default:
+              return "GAL Unknown   ";
+          }
+        }
+      case 3:
+        {
+          switch (sigId)
+          {
+            case 0:
+              return "BeiDou B1I D1 ";
+            case 1:
+              return "BeiDou B1I D2 ";
+            case 2:
+              return "BeiDou B2I D1 ";
+            case 3:
+              return "BeiDou B2I D2 ";
+            case 5:
+              return "BeiDou B1 Cp  ";
+            case 6:
+              return "BeiDou B2 Cd  ";
+            case 7:
+              return "BeiDou B2 ap  ";
+            case 8:
+              return "BeiDou B2 ad  ";
+            default:
+              return "BDS Unknown   ";
+          }
+        }
+      case 5:
+        {
+          switch (sigId)
+          {
+            case 0:
+              return "QZSS L1 C/A   ";
+            case 1:
+              return "QZSS L1S      ";
+            case 4:
+              return "QZSS L2 CM    ";
+            case 5:
+              return "QZSS L2 CL    ";
+            case 8:
+              return "QZSS L5 I     ";
+            case 9:
+              return "QZSS L5 Q     ";
+            default:
+              return "QZSS Unknown  ";
+          }
+        }
+      case 6:
+        {
+          switch (sigId)
+          {
+            case 0:
+              return "GLONASS L1 OF ";
+            case 2:
+              return "GLONASS L2 OF ";
+            default:
+              return "GLO Unknown   ";
+          }
+        }
+      case 7:
+        {
+          switch (sigId)
+          {
+            case 0:
+              return "NavIC L5 A    ";
+            default:
+              return "NavIC Unknown ";
+          }
+        }
+      default:
+        return "Unknown       ";
+    }
+
+}
+
+// Implemented in NavSigDisplay.h (included after this file)
+void NavSig_Store(UBX_NAV_SIG_data_t *ubxDataStruct);
+extern bool nsGnssOk;
+
 void newSIG(UBX_NAV_SIG_data_t *ubxDataStruct)
 {
   Serial.println();
@@ -6,172 +135,15 @@ void newSIG(UBX_NAV_SIG_data_t *ubxDataStruct)
   Serial.print(ubxDataStruct->header.numSigs); // Print numSigs (Number of signals / blocks)
   Serial.println(F(" data blocks:"));
 
-  for (uint8_t block = 0; block < ubxDataStruct->header.numSigs; block++) // For each block
+  NavSig_Store(ubxDataStruct); // hand a copy to the TFT (drawn later from loop())
+
+  uint8_t numBlocks = ubxDataStruct->header.numSigs;
+  if (numBlocks > UBX_NAV_SIG_MAX_BLOCKS) numBlocks = UBX_NAV_SIG_MAX_BLOCKS; // the library stores max 92 blocks
+
+  for (uint8_t block = 0; block < numBlocks; block++) // For each block
   {
     char SV[14 + 4 + 4 + 256 + 1]; // Allocate space for sigId plus svId plus cno plus bars plus NULL
-    switch (ubxDataStruct->blocks[block].gnssId)
-    {
-      case 0:
-        {
-          switch (ubxDataStruct->blocks[block].sigId)
-          {
-            case 0:
-              sprintf(SV, "GPS L1 C/A    ");
-              break;
-            case 3:
-              sprintf(SV, "GPS L2 CL     ");
-              break;
-            case 4:
-              sprintf(SV, "GPS L2 CM     ");
-              break;
-            case 6:
-              sprintf(SV, "GPS L5 I      ");
-              break;
-            case 7:
-              sprintf(SV, "GPS L5 Q      ");
-              break;
-            default:
-              sprintf(SV, "GPS Unknown   ");
-              break;
-          }
-        }
-        break;
-      case 1:
-        {
-          switch (ubxDataStruct->blocks[block].sigId)
-          {
-            case 0:
-              sprintf(SV, "SBAS L1 C/A   ");
-              break;
-            default:
-              sprintf(SV, "SBAS Unknown  ");
-              break;
-          }
-        }
-        break;
-      case 2:
-        {
-          switch (ubxDataStruct->blocks[block].sigId)
-          {
-            case 0:
-              sprintf(SV, "Galileo E1 C  ");
-              break;
-            case 1:
-              sprintf(SV, "Galileo E1 B  ");
-              break;
-            case 3:
-              sprintf(SV, "Galileo E5 aI ");
-              break;
-            case 4:
-              sprintf(SV, "Galileo E5 aQ ");
-              break;
-            case 5:
-              sprintf(SV, "Galileo E5 bI ");
-              break;
-            case 6:
-              sprintf(SV, "Galileo E5 bQ ");
-              break;
-            default:
-              sprintf(SV, "GAL Unknown   ");
-              break;
-          }
-        }
-        break;
-      case 3:
-        {
-          switch (ubxDataStruct->blocks[block].sigId)
-          {
-            case 0:
-              sprintf(SV, "BeiDou B1I D1 ");
-              break;
-            case 1:
-              sprintf(SV, "BeiDou B1I D2 ");
-              break;
-            case 2:
-              sprintf(SV, "BeiDou B2I D1 ");
-              break;
-            case 3:
-              sprintf(SV, "BeiDou B2I D2 ");
-              break;
-            case 5:
-              sprintf(SV, "BeiDou B1 Cp  ");
-              break;
-            case 6:
-              sprintf(SV, "BeiDou B2 Cd  ");
-              break;
-            case 7:
-              sprintf(SV, "BeiDou B2 ap  ");
-              break;
-            case 8:
-              sprintf(SV, "BeiDou B2 ad  ");
-              break;
-            default:
-              sprintf(SV, "BDS Unknown   ");
-              break;
-          }
-        }
-        break;
-      case 5:
-        {
-          switch (ubxDataStruct->blocks[block].sigId)
-          {
-            case 0:
-              sprintf(SV, "QZSS L1 C/A   ");
-              break;
-            case 1:
-              sprintf(SV, "QZSS L1S      ");
-              break;
-            case 4:
-              sprintf(SV, "QZSS L2 CM    ");
-              break;
-            case 5:
-              sprintf(SV, "QZSS L2 CL    ");
-              break;
-            case 8:
-              sprintf(SV, "QZSS L5 I     ");
-              break;
-            case 9:
-              sprintf(SV, "QZSS L5 Q     ");
-              break;
-            default:
-              sprintf(SV, "QZSS Unknown  ");
-              break;
-          }
-        }
-        break;
-      case 6:
-        {
-          switch (ubxDataStruct->blocks[block].sigId)
-          {
-            case 0:
-              sprintf(SV, "GLONASS L1 OF ");
-              break;
-            case 2:
-              sprintf(SV, "GLONASS L2 OF ");
-              break;
-            default:
-              sprintf(SV, "GLO Unknown   ");
-              break;
-          }
-        }
-        break;
-      case 7:
-        {
-          switch (ubxDataStruct->blocks[block].sigId)
-          {
-            case 0:
-              sprintf(SV, "NavIC L5 A    ");
-              break;
-            default:
-              sprintf(SV, "NavIC Unknown ");
-              break;
-          }
-        }
-        break;
-      default:
-        sprintf(SV, "Unknown       ");
-        break;
-    }
+    strcpy(SV, GNSS_SignalName(ubxDataStruct->blocks[block].gnssId, ubxDataStruct->blocks[block].sigId));
 
   if (ubxDataStruct->blocks[block].svId < 10) sprintf(&SV[14], "%d   ", ubxDataStruct->blocks[block].svId); // Align the svId
   else if (ubxDataStruct->blocks[block].svId < 100) sprintf(&SV[14], "%d  ", ubxDataStruct->blocks[block].svId); // Align the svId
@@ -203,7 +175,8 @@ void GNSS_Setup(){
     delay(1000);
   }
   */
-  if(myGNSS.begin(mySerial) == false) 
+  nsGnssOk = myGNSS.begin(mySerial);
+  if (nsGnssOk == false)
       Serial.println(F("u-blox GNSS not detected...."));
     else   Serial.println(F("u-blox GNSS ok...."));
   if (myGNSS.getModuleInfo())
