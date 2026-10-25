@@ -3,6 +3,9 @@
   This sketch performs a comprehensive speed test of the GFX library, 
   measuring performance for text, lines, shapes, and rotations.
   Optimized for Landscape mode (800x480) on the Arduino Giga Display.
+
+  https://docs.openmv.io/v5.0.0/openmvcam/quickref/arduino-giga-r1-wifi.html
+  
 */
 #include <mbed.h>
 #include "Arduino_GigaDisplay_GFX.h"
